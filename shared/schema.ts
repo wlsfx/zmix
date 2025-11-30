@@ -294,6 +294,76 @@ export const zkMerkleRoots = pgTable("zk_merkle_roots", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Hop wallet recovery - encrypted backup for automatic fund recovery
+export const hopWalletRecovery = pgTable("hop_wallet_recovery", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: text("session_id").notNull(), // Anonymous session ID
+  mixSessionId: text("mix_session_id"), // Associated mixer session
+  encryptedKeys: text("encrypted_keys").notNull(), // AES-256-CBC encrypted hop wallet keys (JSON array)
+  hopCount: integer("hop_count").notNull(),
+  status: text("status").notNull().default('pending'), // 'pending', 'recovered', 'expired'
+  expiresAt: timestamp("expires_at").notNull(), // 24-hour recovery window
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  recoveredAt: timestamp("recovered_at"),
+});
+
+export const insertHopWalletRecoverySchema = createInsertSchema(hopWalletRecovery).omit({
+  id: true,
+  createdAt: true,
+  recoveredAt: true,
+});
+
+// Privacy Pool Deposits - tracks deposits into the ZK pool for integrated mixer
+export const zkPoolDeposits = pgTable("zk_pool_deposits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: text("session_id").notNull(), // Anonymous session ID
+  mixerSessionId: varchar("mixer_session_id"), // Link to mixerSessions for integrated flow
+  tier: text("tier").notNull(), // 'TIER_0_1', 'TIER_0_5', 'TIER_1_0', 'TIER_5_0'
+  amountSol: numeric("amount_sol", { precision: 18, scale: 9 }).notNull(),
+  commitmentHash: text("commitment_hash").notNull().unique(), // Poseidon commitment
+  encryptedNote: text("encrypted_note").notNull(), // AES encrypted deposit note for recovery
+  depositTxSignature: text("deposit_tx_signature"), // Solana tx when deposit confirmed
+  status: text("status").notNull().default('pending'), // 'pending', 'deposited', 'queued', 'withdrawing', 'withdrawn', 'failed'
+  anonymityDelay: integer("anonymity_delay").default(300).notNull(), // Seconds to wait before withdrawal (min 5 min)
+  withdrawAfter: timestamp("withdraw_after"), // When withdrawal can be processed
+  destinationAddress: text("destination_address"), // Final destination after multi-hop
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  depositedAt: timestamp("deposited_at"),
+  withdrawnAt: timestamp("withdrawn_at"),
+  errorMessage: text("error_message"),
+});
+
+// Privacy Pool Withdrawals - tracks withdrawal execution
+export const zkPoolWithdrawals = pgTable("zk_pool_withdrawals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  depositId: varchar("deposit_id").notNull(), // Reference to zkPoolDeposits
+  sessionId: text("session_id").notNull(),
+  nullifierHash: text("nullifier_hash").notNull().unique(), // For double-spend prevention
+  recipientAddress: text("recipient_address").notNull(), // Hop wallet 0 address (not final destination)
+  proofData: text("proof_data"), // JSON stringified Groth16 proof
+  amountReceived: numeric("amount_received", { precision: 18, scale: 9 }), // After fees
+  platformFee: numeric("platform_fee", { precision: 18, scale: 9 }),
+  relayerFee: numeric("relayer_fee", { precision: 18, scale: 9 }),
+  withdrawalTxSignature: text("withdrawal_tx_signature"),
+  status: text("status").notNull().default('pending'), // 'pending', 'proving', 'broadcasting', 'confirmed', 'failed'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  confirmedAt: timestamp("confirmed_at"),
+  errorMessage: text("error_message"),
+});
+
+export const insertZkPoolDepositSchema = createInsertSchema(zkPoolDeposits).omit({
+  id: true,
+  createdAt: true,
+  depositedAt: true,
+  withdrawnAt: true,
+});
+
+export const insertZkPoolWithdrawalSchema = createInsertSchema(zkPoolWithdrawals).omit({
+  id: true,
+  createdAt: true,
+  confirmedAt: true,
+});
+
 export const insertZkCommitmentSchema = createInsertSchema(zkCommitments).omit({
   id: true,
   createdAt: true,
@@ -343,3 +413,9 @@ export type InsertZkNullifier = z.infer<typeof insertZkNullifierSchema>;
 export type ZkNullifier = typeof zkNullifiers.$inferSelect;
 export type InsertZkMerkleRoot = z.infer<typeof insertZkMerkleRootSchema>;
 export type ZkMerkleRoot = typeof zkMerkleRoots.$inferSelect;
+export type InsertHopWalletRecovery = z.infer<typeof insertHopWalletRecoverySchema>;
+export type HopWalletRecovery = typeof hopWalletRecovery.$inferSelect;
+export type InsertZkPoolDeposit = z.infer<typeof insertZkPoolDepositSchema>;
+export type ZkPoolDeposit = typeof zkPoolDeposits.$inferSelect;
+export type InsertZkPoolWithdrawal = z.infer<typeof insertZkPoolWithdrawalSchema>;
+export type ZkPoolWithdrawal = typeof zkPoolWithdrawals.$inferSelect;

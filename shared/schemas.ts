@@ -31,6 +31,7 @@ export const mixerSchema = z.object({
     .refine((val) => !isNaN(parseFloat(val)) && parseFloat(val) > 0, {
       message: 'Amount must be greater than 0',
     }),
+  usePrivacyPool: z.boolean().default(true), // Route through ZK privacy pool first
   enableDelay: z.boolean().default(false),
   delayMinutes: z.number().min(1).max(60).default(5),
   referralCode: z.string().optional(),

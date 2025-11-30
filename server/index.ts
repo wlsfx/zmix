@@ -1,11 +1,13 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import { registerRoutes } from "./routes";
+import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { seedPricingTiers } from "./seedPricingTiers";
 
 const app = express();
 
+// Trust proxy for secure cookies behind TLS-terminating proxies (Replit, nginx, etc.)
 app.set('trust proxy', 1);
 
 declare module 'http' {
@@ -14,11 +16,12 @@ declare module 'http' {
   }
 }
 
+// Session configuration
 const isProduction = process.env.NODE_ENV === 'production';
 const sessionSecret = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 
 if (!process.env.SESSION_SECRET && isProduction) {
-  console.warn('SESSION_SECRET not set! Using fallback (insecure for production)');
+  console.warn('⚠️  SESSION_SECRET not set! Using fallback (insecure for production)');
 }
 
 app.use(session({
@@ -29,7 +32,7 @@ app.use(session({
     httpOnly: true,
     secure: isProduction,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
   name: 'zmix.sid',
 }));
@@ -40,16 +43,6 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: false }));
-
-function log(message: string) {
-  const time = new Date().toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-  console.log(`${time} [express] ${message}`);
-}
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -71,7 +64,7 @@ app.use((req, res, next) => {
       }
 
       if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "...";
+        logLine = logLine.slice(0, 79) + "…";
       }
 
       log(logLine);
@@ -82,6 +75,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Seed pricing tiers on startup
   await seedPricingTiers(storage);
 
   const server = await registerRoutes(app);
@@ -91,19 +85,28 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    console.error(err);
+    throw err;
   });
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
 
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
   server.listen({
     port,
     host: "0.0.0.0",
     reusePort: true,
   }, () => {
-    log(`zmix backend serving on port ${port}`);
+    log(`serving on port ${port}`);
   });
 })();
